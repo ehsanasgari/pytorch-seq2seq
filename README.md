@@ -1,4 +1,4 @@
-#SeqWithAttention
+# SeqWithAttention
 
 This repository contains an implementation of an LSTM sequence to sequence model in PyTorch. Right now, the implementation is pretty basic and I'm using it on a toy task (an autoencoder for sentences). The source material is sentences from the Jane Austen collection (downloaded on Project Gutenberg, included in this repo). 
 
