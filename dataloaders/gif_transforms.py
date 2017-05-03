@@ -44,7 +44,7 @@ def get_frames(img, keep_frames=None):
         if dispose is None:
             prev.paste(frame, bbox, frame.convert('RGBA'))
             if i in keep_frames_set:
-                all_frames.append(np.array(prev)[:,:,:3])
+                all_frames.append(np.array(prev)[:, :, :3])
             prev_dispose = False
         else:
             if prev_dispose:
@@ -52,7 +52,7 @@ def get_frames(img, keep_frames=None):
             out = prev.copy()
             out.paste(frame, bbox, frame.convert('RGBA'))
             if i in keep_frames_set:
-                all_frames.append(np.array(out)[:,:,:3])
+                all_frames.append(np.array(out)[:, :, :3])
     return np.stack(all_frames)
 
 
@@ -96,9 +96,15 @@ class RandomCrop(object):
         if w == tw and h == th:
             return img
 
+        print("Image shape is {}, size is {}".format(img.shape, self.size))
+
+        if (w < tw) or (h < th):
+            raise ValueError('Image too small')
+
         x1 = random.randint(0, w - tw)
         y1 = random.randint(0, h - th)
         return img[:, y1:y1+th, x1:x1+tw]
+
 
 class CenterCrop(object):
     """Crops the given ndimage at a random location to have a region of
@@ -121,6 +127,10 @@ class CenterCrop(object):
         th, tw = self.size
         if w == tw and h == th:
             return img
+
+        if (w < tw) or (h < th):
+            raise ValueError('Image too small')
+
         x1 = int(round((w - tw) / 2.))
         y1 = int(round((h - th) / 2.))
 
@@ -152,7 +162,7 @@ class Scale(object):
         else:
             oh = self.size
             ow = int(self.size * w / h)
-        return np.stack([resize(frame, (oh, ow)) for frame in img])
+        return np.stack([resize(frame, (oh, ow), mode='constant') for frame in img])
 
 
 class RandomHorizontalFlip(object):
@@ -171,8 +181,10 @@ class ToTensor(object):
     """
 
     def __call__(self, vid):
-        img = torch.from_numpy(pic.transpose((3, 1, 2)))
+        print("Vid shape is {}".format(vid.shape))
+        img = torch.from_numpy(vid.transpose((0,3, 1, 2)))
         return img.float().div(255)
+
 
 class Normalize(object):
     """Given mean: (R, G, B) and std: (R, G, B),

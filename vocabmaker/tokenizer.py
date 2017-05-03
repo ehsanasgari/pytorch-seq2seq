@@ -9,20 +9,18 @@ from __future__ import unicode_literals
 
 import spacy
 from spacy.symbols import ORTH, LEMMA, POS
-
+import sys
 from unidecode import unidecode
 
-def _maybe_unicode(st):
-    """
-    TODO: make this python 3 compatible
-    :param st:
-    :return:
-    """
-    if not isinstance(st, unicode):
-        st = unicode(st)
-    st = unicode(unidecode(st))
-    return st
-
+if sys.version_info[0] < 3:
+    def _maybe_unicode(st):
+        if not isinstance(st, unicode):
+            st = unicode(st)
+        st = unicode(unidecode(st))
+        return st
+else:
+    def _maybe_unicode(st):
+        return unidecode(st)
 
 INT_TO_STR = {
     0: 'zero', 1: 'one', 2: 'two', 3: 'three', 4: 'four',

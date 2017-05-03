@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from vocabmaker.vocabmaker import Vocab
+
 import csv
 import os
 import random
@@ -15,14 +17,13 @@ from torch import IntTensor
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
 from unidecode import unidecode
-
-from dataloaders.gif_transforms import load_gif, RandomCrop, CenterCrop, ToTensor, Normalize
-from vocabmaker.vocabmaker import Vocab
+from vocabmaker.tokenizer import _maybe_unicode
+from dataloaders.gif_transforms import load_gif, RandomCrop, CenterCrop, ToTensor, Normalize, Scale
 
 # Replace with your info
-FN_TO_CAPS = 'tgif/tgif-v1.0.tsv'
-GIFS_FOLDER = 'tgif/gifs'
-SPLITS = 'tgif/data/splits'
+FN_TO_CAPS = 'dataloaders/tgif/tgif-v1.0.tsv'
+GIFS_FOLDER = 'dataloaders/tgif/gifs'
+SPLITS = 'dataloaders/tgif/splits'
 
 # Needed for torch pretrained stuff
 normalize = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -32,7 +33,7 @@ def _fix_fn(fn):
     """
     Makes it so that we're not referring to the tumblr.com URL
     """
-    return fn.split('/')[-1]
+    return '{}/{}'.format(GIFS_FOLDER, fn.split('/')[-1])
 
 
 # Get the splits
@@ -58,20 +59,28 @@ def make_dataset(save_to='tgif-vocab.pkl'):
         with open(save_to, 'rb') as f:
             return pkl.load(f)
 
-    splits = {m: _read_split(m) for m in ('train','val','test')}
+    splits = {m: set(_read_split(m)) for m in ('train','val','test')}
 
     # Get the data
     with open(FN_TO_CAPS,'r') as f:
-        data = [(_fix_fn(fn), unidecode(cap.decode('utf-8')))
+        data_ = [(_fix_fn(fn), _maybe_unicode(cap))
                 for fn, cap in csv.reader(f, delimiter='\t')]
+        data = []
+        for x in data_:
+            # if not os.path.exists(x[0]):
+            #     print("{} doesnt exist".format(x[0]))
+            data.append(x)
 
+    print("fitting vocab")
     vocab = Vocab(vocab_size=10000, compress_vocab=True)
     vocab.fit((x[1] for x in data if x[0] not in splits['test']))
 
+    print("splitting")
     train = [d for d in data if d[0] in splits['train']]
     val = [d for d in data if d[0] in splits['val']]
     test = [d for d in data if d[0] in splits['test']]
 
+    print("saving")
     with open(save_to, 'wb') as f:
         pkl.dump((train, val, test, vocab), f)
     return train, val, test, vocab
@@ -91,7 +100,7 @@ class TgifDataset(data.Dataset):
 
         crop = RandomCrop if self.is_train else CenterCrop
         self.transform = transforms.Compose([
-            # Scale(int(cnn_size*1.2)),
+            Scale(int(cnn_size*1.1)),
             crop(cnn_size),
             ToTensor(),
             normalize,
@@ -164,10 +173,11 @@ class MegaDataLoader(torch.utils.data.DataLoader):
 
 
 # Handles the loading
-def loader(batch_size=32, shuffle=True, num_workers=1):
-    all_sents, vocab = make_dataset()
-    t_data = TgifDataset(all_sents, vocab)
-    t_data_test = TgifDataset(all_sents, vocab, is_train=False)
+def loader(batch_size=32, use_test=False, shuffle=True, num_workers=1):
+    train, val, test, vocab = make_dataset()
+
+    t_data = TgifDataset(train, vocab)
+    t_data_test = TgifDataset(val if not use_test else test, vocab, is_train=False)
 
     train_data_loader = MegaDataLoader(
         dataset=t_data,

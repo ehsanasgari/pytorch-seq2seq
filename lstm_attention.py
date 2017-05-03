@@ -37,8 +37,8 @@ class EncoderRNN(nn.Module):
             self.cnn = models.resnet101(pretrained=True)
 
             # FOR NOW
-            for param in self.cnn.parameters():
-                param.requires_grad = False
+            # for param in self.cnn.parameters():
+            #     param.requires_grad = False
             self.cnn.fc = nn.Linear(self.cnn.fc.in_features, self.input_size)
 
             # Init weights (should be moved.)

@@ -13,14 +13,6 @@ from collections import defaultdict
 import numpy as np
 from vocabmaker.tokenizer import Tokenizer
 import os
-#
-# PYTORCH_IMPORTED = True
-# try:
-#     # Optional pytorch
-#     import torch
-# except ImportError:
-#     PYTORCH_IMPORTED = False
-
 
 
 class Vocab(object):
@@ -167,7 +159,7 @@ class Vocab(object):
         self._vocab = [u"<EOS>", u"<BOS>", u"<UNK>"]
 
         counts = []
-        for v, count in sorted(freq_dist.iteritems(), key=lambda (k, v): v, reverse=True):
+        for v, count in sorted(freq_dist.items(), key=lambda x: x[1], reverse=True):
             self._vocab.append(v)
             counts.append(count)
 
