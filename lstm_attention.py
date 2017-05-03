@@ -13,7 +13,7 @@ from pytorch_misc import rnn_mask, packed_seq_iter, pad_unsorted_sequence
 from torchvision import models
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, use_embedding=False, vocab_size=None):
+    def __init__(self, input_size, hidden_size, use_embedding=False, use_cnn=False, vocab_size=None):
         """
         Bidirectional GRU for encoding sequences
         :param input_size: Size of the feature dimension (or, if use_embedding=True, the embed dim)
@@ -28,6 +28,7 @@ class EncoderRNN(nn.Module):
         self.gru = nn.GRU(input_size, hidden_size, bidirectional=True)
 
         self.use_embedding = use_embedding
+        self.use_cnn = use_cnn
         self.vocab_size = vocab_size
         if self.use_embedding:
             assert self.vocab_size is not None
@@ -272,6 +273,48 @@ class AttnDecoderRNN(nn.Module):
 
     def _init_hidden(self, h_dec):
         return F.tanh(self.init_hidden(h_dec))
+
+def deploy_vid(input_variable, input_lengths, encoder, decoder, max_len=20):
+    """
+    calls the enc/dec model
+    :param input_variable: Inputs to encode
+    :param encoder: EncoderRNN
+    :param decoder: AttnDecoderRNN
+    :param max_len: Maximum length of generated captions
+    :return:
+    """
+    context, context_lens, final_h = encoder(input_variable, input_lengths)
+    return decoder.sampler(final_h, context, context_lens, max_len)
+
+
+def train_batch_vid(input_variable, input_lengths, targets_in, targets_out, encoder, decoder,
+                    encoder_optimizer, decoder_optimizer, criterion):
+    """
+    calls for training
+    :param input_variable: Inputs to encode
+    :param targets_in: <bos> padded PackedSequence of targets
+    :param targets_out: <eos> ending PackedSequence of targets
+    :param encoder: EncoderRNN
+    :param decoder: AttnDecoderRNN
+    :param encoder_optimizer:
+    :param decoder_optimizer:
+    :param criterion: Callable loss function for two sequences
+    :return: loss (also does an update on the parameters)
+    """
+    encoder_optimizer.zero_grad()
+    decoder_optimizer.zero_grad()
+
+    context, context_lens, final_h = encoder(input_variable, input_lengths)
+    outputs = decoder(final_h, targets_in, context, context_lens)
+
+    # NOTE: currently this is weighting longer sequences more than shorter ones.
+    # This seems easier, anyone is welcome to change this though
+    loss = criterion(outputs.data, targets_out.data) / len(targets_out.data)
+
+    loss.backward()
+    encoder_optimizer.step()
+    decoder_optimizer.step()
+    return loss
 
 
 def deploy_txt(input_variable, encoder, decoder, max_len=20):
