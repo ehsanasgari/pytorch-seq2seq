@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import time
-from dataloaders.toy_translation import loader
+from dataloaders.tgif import loader
 import torch
 
 from torch import optim
@@ -21,16 +21,17 @@ d_dec = 128
 
 encoder = EncoderRNN(d_enc_input, d_enc, use_embedding=True, vocab_size=len(vocab))
 decoder = AttnDecoderRNN(d_dec_input, d_enc*2, d_dec, vocab_size=len(vocab))
+criterion = CrossEntropyLoss()
 
 if torch.cuda.is_available():
     print("Using cuda")
     encoder.cuda()
     decoder.cuda()
+    criterion.cuda()
 
 learning_rate = 0.0001
 encoder_optimizer = optim.RMSprop(encoder.parameters(), lr=learning_rate)
 decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
-criterion = CrossEntropyLoss()
 
 for epoch in range(1, 50):
     for b, (train_x, train_y_in, train_y_out) in enumerate(train_loader):
