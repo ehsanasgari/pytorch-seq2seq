@@ -12,7 +12,7 @@ from torch.nn import CrossEntropyLoss
 from lstm_attention import EncoderRNN, AttnDecoderRNN, deploy_vid, train_batch_vid
 from torch.nn.utils.rnn import pad_packed_sequence
 
-vocab, train_loader, test_loader = loader(batch_size=4)
+vocab, train_loader, test_loader = loader(batch_size=8)
 
 d_enc_input = 300
 d_enc = 256

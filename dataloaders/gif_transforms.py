@@ -56,7 +56,7 @@ def get_frames(img, keep_frames=None):
     return np.stack(all_frames)
 
 
-def load_gif(fn, offset=0, desired_fps=5):
+def load_gif(fn, offset=0, desired_fps=3):
     """
     :param fn: Filename with a gif
     :param offset: How many frames into the gif we want to start at

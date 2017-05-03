@@ -80,7 +80,9 @@ class EncoderRNN(nn.Module):
                 x_data = batch_map(self.cnn, x, MAX_CNN_SIZE)
             else:
                 x_data = x
-            x, lengths, perm = pad_unsorted_sequence(x_data, lengths)
+            x, perm = pad_unsorted_sequence(x_data, lengths)
+
+            print("X shape is {}".format(x.size()))
         else:
             # if not torch.is_tensor(x):
             #     raise ValueError('Input to EncoderRNN is not a tensor, list, or PackedSequence')
@@ -99,7 +101,7 @@ class EncoderRNN(nn.Module):
         output_t = output.transpose(0,1)
         h_n_fixed = h_n.transpose(0,1)
         if perm is not None:
-            output_t = output[perm]
+            output_t = output_t[perm]
             h_n_fixed = h_n_fixed[perm]
 
         output_t = output_t.contiguous()
@@ -207,6 +209,9 @@ class AttnDecoderRNN(nn.Module):
                 alpha: (batch_size, source_l) distribution over the encoded hidden states,
                        useful for debugging maybe
         """
+        print("state {} emb {} context {} mask {}".format(
+            state.size(), embed.size(), context.size(), mask.size()
+        ))
 
         c_t, alpha = self.attn(state, context, mask)
         gru_inp = torch.cat((embed, c_t), 1).unsqueeze(0)
@@ -264,7 +269,6 @@ class AttnDecoderRNN(nn.Module):
         outputs = []
         for emb, batch_size in zip(packed_seq_iter((embeds, inputs.batch_sizes)),
                                    inputs.batch_sizes):
-
             out, state, alpha = self._lstm_loop(
                 state[:batch_size],
                 emb[:batch_size],
@@ -288,6 +292,11 @@ def deploy_vid(input_variable, input_lengths, encoder, decoder, max_len=20):
     :return:
     """
     context, context_lens, final_h = encoder(input_variable, input_lengths)
+
+    print("Context: {} context_lens {} final_h {}".format(context, context_lens, final_h))
+
+
+
     return decoder.sampler(final_h, context, context_lens, max_len)
 
 
@@ -309,6 +318,7 @@ def train_batch_vid(input_variable, input_lengths, targets_in, targets_out, enco
     decoder_optimizer.zero_grad()
 
     context, context_lens, final_h = encoder(input_variable, input_lengths)
+    print("Context: {} context_lens {} final_h {}".format(context, context_lens, final_h))
     outputs = decoder(final_h, targets_in, context, context_lens)
 
     # NOTE: currently this is weighting longer sequences more than shorter ones.

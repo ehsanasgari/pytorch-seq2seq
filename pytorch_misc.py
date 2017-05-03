@@ -45,7 +45,7 @@ def rnn_mask(context_lens):
     """
     Creates a mask for variable length sequences
     """
-    mask = Variable(torch.zeros(len(context_lens), context_lens[0]))
+    mask = Variable(torch.zeros(len(context_lens), max(context_lens)))
     if torch.cuda.is_available():
         mask = mask.cuda()
 
@@ -119,9 +119,10 @@ def pad_unsorted_sequence(sequences, lengths):
         Tuple of Variable containing the padded sequence, and a list of lengths
         of each sequence in the batch.
     """
-    sorted_lengths, fwd_indices = torch.sort(torch.IntTensor(lengths), descending=True)
+    sorted_lengths, fwd_indices = torch.sort(torch.IntTensor(lengths), dim=0, descending=True)
     inv_indices = torch.sort(fwd_indices)[1]
 
+    print("Lengths: {}".format(lengths))
     print("Sorted lengths: {}".format(sorted_lengths))
     print("perm_indices {}".format(inv_indices))
 
@@ -134,6 +135,8 @@ def pad_unsorted_sequence(sequences, lengths):
     for seq_l, sorted_seq_id in zip(lengths, inv_indices):
         output[:seq_l, sorted_seq_id] = sequences[data_offset:data_offset + seq_l]
 
-    lengths_transposed = transpose_batch_sizes(sorted_lengths)
+    if torch.cuda.is_available():
+        inv_indices = inv_indices.cuda()
+        print("Hi {}".format(inv_indices))
 
-    return output, lengths_transposed, fwd_indices
+    return output, inv_indices
