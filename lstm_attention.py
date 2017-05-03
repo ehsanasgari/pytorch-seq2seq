@@ -9,8 +9,8 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
 import numpy as np
-from pytorch_misc import rnn_mask, packed_seq_iter
-
+from pytorch_misc import rnn_mask, packed_seq_iter, pad_unsorted_sequence
+from torchvision import models
 
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, use_embedding=False, vocab_size=None):
@@ -32,8 +32,15 @@ class EncoderRNN(nn.Module):
         if self.use_embedding:
             assert self.vocab_size is not None
             self.embed = nn.Embedding(self.vocab_size, self.input_size)
+        elif self.use_cnn:
+            self.cnn = models.resnet101(pretrained=True)
+            self.cnn.fc = nn.Linear(self.cnn.fc.in_features, self.input_size)
 
-    def forward(self, x):
+            # Init weights (should be moved.)
+            self.cnn.fc.weight.data.normal_(0.0, 0.02)
+            self.cnn.fc.bias.data.fill_(0)
+
+    def forward(self, x, lengths=None):
         """
         Forward pass.
         :param x: Can either be a time-first packed variable length sequence, with no final
@@ -46,24 +53,50 @@ class EncoderRNN(nn.Module):
                  lengths: of length batch_size, per timestep
                  hidden: Hidden representation at time t (fwd) and 1 (backward)
         """
+        perm = None
         if isinstance(x, PackedSequence):
+        # Assume x is a (T*batch_size,:) packed_sequence
             if self.use_embedding:
-                x = PackedSequence(self.embed(x.data), x.batch_sizes)
-            x, lengths = pad_packed_sequence(x)
+                x_data = self.embed(x.data)
+            elif self.use_cnn:
+                x_data = self.cnn(x.data)
+            else:
+                x_data = x.data
+
+            x, lengths = pad_packed_sequence(PackedSequence(x_data, x.batch_sizes))
+        elif torch.is_tensor(x) and lengths is not None:
+            if self.use_embedding:
+                x_data = self.embed(x)
+            elif self.use_cnn:
+                x_data = self.cnn(x)
+            else:
+                x_data = x
+            x, lengths, perm = pad_unsorted_sequence(x_data, lengths)
         else:
+            if not torch.is_tensor(x):
+                raise ValueError('Input to EncoderRNN is not a tensor, list, or PackedSequence')
+
             assert x.ndimension() > 1, "Non PackedSequence input to EncoderRNN must have >= 2 dims"
             if self.use_embedding:
                 new_size = list(x.size()) + [-1]
                 x = self.embed(x.view(-1)).view(*new_size)
+            elif self.use_cnn:
+                raise NotImplementedError('not implemented yet.')
+
             lengths = [x.size(0) for x in range(x.size(1))]
 
         output, h_n = self.gru(x)
 
-        # Transpose now for ease of use later
-        output = output.transpose(0, 1).contiguous()
-        h_n_fixed = h_n.transpose(0, 1).contiguous().view(-1, self.hidden_size * 2)
+        output_t = output.transpose(0,1)
+        h_n_fixed = h_n.transpose(0,1)
+        if perm is not None:
+            output_t = output[perm]
+            h_n_fixed = h_n_fixed[perm]
 
-        return output, lengths, h_n_fixed
+        output_t = output_t.contiguous()
+        h_n_fixed = h_n_fixed.contiguous().view(-1, self.hidden_size * 2)
+
+        return output_t, lengths, h_n_fixed
 
 
 class GlobalAttention(nn.Module):
