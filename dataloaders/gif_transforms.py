@@ -34,7 +34,7 @@ def get_frames(img, keep_frames=None):
 
         if frame.tile:
             x0, y0, x1, y1 = frame.tile[0][1]
-            if not frame.palette.dirty:
+            if (frame.palette is None) or (not frame.palette.dirty):
                 frame.putpalette(pal)
             frame = frame.crop((x0, y0, x1, y1))
             bbox = (x0, y0, x1, y1)
@@ -64,11 +64,18 @@ def load_gif(fn, offset=0, desired_fps=5):
     :return: [T, h, w, 3] GIF
     """
     img = Image.open(fn)
-    fps = 1000.0/img.info['duration']
+    if img.info['duration'] == 0:
+        fps = 10
+    else:
+        fps = 1000.0 / img.info['duration']
+
 
     # want to scale it to desired_fps
-    keep_ratio = min(1., fps/desired_fps)
+    keep_ratio = max(1., fps/desired_fps)
+
     frames = np.arange(offset, img.n_frames, keep_ratio).astype(np.uint8)
+    print("Originally {} frames -> {} frames {} KR={}".format(img.n_frames, len(frames), frames, keep_ratio))
+
     return get_frames(img, frames)
 
 

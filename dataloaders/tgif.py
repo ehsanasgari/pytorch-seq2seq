@@ -67,9 +67,10 @@ def make_dataset(save_to='tgif-vocab.pkl'):
                 for fn, cap in csv.reader(f, delimiter='\t')]
         data = []
         for x in data_:
-            # if not os.path.exists(x[0]):
+            if os.path.exists(x[0]):
+                data.append(x)
+            # else:
             #     print("{} doesnt exist".format(x[0]))
-            data.append(x)
 
     print("fitting vocab")
     vocab = Vocab(vocab_size=10000, compress_vocab=True)
@@ -87,7 +88,7 @@ def make_dataset(save_to='tgif-vocab.pkl'):
 
 
 class TgifDataset(data.Dataset):
-    def __init__(self, data, vocab, is_train=True, cnn_size=299):
+    def __init__(self, data, vocab, is_train=True, cnn_size=224, scale_size=256):
         """
         :param all_sents: List of (input, target) sentences
         :param vocab: Vocab
@@ -100,7 +101,7 @@ class TgifDataset(data.Dataset):
 
         crop = RandomCrop if self.is_train else CenterCrop
         self.transform = transforms.Compose([
-            Scale(int(cnn_size*1.1)),
+            Scale(scale_size),
             crop(cnn_size),
             ToTensor(),
             normalize,
@@ -118,7 +119,7 @@ class TgifDataset(data.Dataset):
         return len(self.data)
 
 
-def collate_fn(data, bos_token, eos_token, cnn_size=299):
+def collate_fn(data, bos_token, eos_token):
     """
     Creates minibatch tensors from list of (input, output) pairs
 
@@ -160,13 +161,19 @@ class MegaDataLoader(torch.utils.data.DataLoader):
     """
     @staticmethod
     def _load(item):
-        def _cudaize(t):
+        def _cudaize_packed(t):
             data = Variable(t.data)
             if torch.cuda.is_available():
                 data = data.cuda()
             return PackedSequence(data, t.batch_sizes)
 
-        return [_cudaize(t) for t in item]
+        def _cudaize(t):
+            data = Variable(t)
+            if torch.cuda.is_available():
+                data = data.cuda()
+            return data
+
+        return _cudaize(item[0]), item[1], _cudaize_packed(item[2]), _cudaize_packed(item[3])
 
     def __iter__(self):
         return (self._load(x) for x in super(MegaDataLoader, self).__iter__())

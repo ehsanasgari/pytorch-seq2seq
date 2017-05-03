@@ -9,8 +9,10 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
 import numpy as np
-from pytorch_misc import rnn_mask, packed_seq_iter, pad_unsorted_sequence
+from pytorch_misc import rnn_mask, packed_seq_iter, pad_unsorted_sequence, batch_map
 from torchvision import models
+
+MAX_CNN_SIZE = 32
 
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, use_embedding=False, use_cnn=False, vocab_size=None):
@@ -59,8 +61,9 @@ class EncoderRNN(nn.Module):
                  hidden: Hidden representation at time t (fwd) and 1 (backward)
         """
         perm = None
+        # print("X is {} and lengths is {}".format(x, lengths))
         if isinstance(x, PackedSequence):
-        # Assume x is a (T*batch_size,:) packed_sequence
+            # Assume x is a (T*batch_size,:) packed_sequence
             if self.use_embedding:
                 x_data = self.embed(x.data)
             elif self.use_cnn:
@@ -69,17 +72,18 @@ class EncoderRNN(nn.Module):
                 x_data = x.data
 
             x, lengths = pad_packed_sequence(PackedSequence(x_data, x.batch_sizes))
-        elif torch.is_tensor(x) and lengths is not None:
+        elif lengths is not None:
             if self.use_embedding:
                 x_data = self.embed(x)
             elif self.use_cnn:
-                x_data = self.cnn(x)
+                print("X is of size {}, going through CNN".format(x.size()))
+                x_data = batch_map(self.cnn, x, MAX_CNN_SIZE)
             else:
                 x_data = x
             x, lengths, perm = pad_unsorted_sequence(x_data, lengths)
         else:
-            if not torch.is_tensor(x):
-                raise ValueError('Input to EncoderRNN is not a tensor, list, or PackedSequence')
+            # if not torch.is_tensor(x):
+            #     raise ValueError('Input to EncoderRNN is not a tensor, list, or PackedSequence')
 
             assert x.ndimension() > 1, "Non PackedSequence input to EncoderRNN must have >= 2 dims"
             if self.use_embedding:

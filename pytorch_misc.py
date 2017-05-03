@@ -53,6 +53,46 @@ def rnn_mask(context_lens):
         mask[b, :batch_l] = 1
     return mask
 
+
+def batch_index_iterator(len_l, batch_size, skip_end=True):
+    """
+    Provides indices that iterate over a list
+    :param len_l: int representing size of thing that we will
+        iterate over
+    :param batch_size: size of each batch
+    :param skip_end: if true, don't iterate over the last batch
+    :return: A generator that returns (start, end) tuples
+        as it goes through all batches
+    """
+    iterate_until = len_l
+    if skip_end:
+        iterate_until = (len_l // batch_size) * batch_size
+
+    for b_start in range(0, iterate_until, batch_size):
+        yield (b_start, min(b_start+batch_size, len_l))
+
+
+def batch_map(f, a, batch_size):
+    """
+    Maps f over the array a in chunks of batch_size.
+    :param f: function to be applied. Must take in a block of
+            (batch_size, dim_a) and map it to (batch_size, something).
+    :param a: Array to be applied over of shape (num_rows, dim_a).
+    :param batch_size: size of each array
+    :return: Array of size (num_rows, something).
+    """
+    rez = []
+    for s, e in batch_index_iterator(a.size(0), batch_size, skip_end=False):
+        print("Calling on {}".format(a[s:e].size()))
+        rez.append(f(a[s:e]))
+
+    # rez = [f(a[s:e]) for s, e in batch_index_iterator(a.size(0),
+    #                                                batch_size,
+    #                                                skip_end=False)]
+    return torch.cat(rez)
+
+
+
 def pad_unsorted_sequence(sequences, lengths):
     """
     Pads the sequences that is not necessarily in longest-batch-first order
