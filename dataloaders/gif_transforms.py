@@ -4,79 +4,38 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-import math
 import random
-from PIL import Image, ImageOps, ImageSequence
 import numpy as np
 import numbers
-import types
-import collections
 from skimage.transform import resize
-from torchvision.transforms import Compose
-from scipy.ndimage.interpolation import zoom
+from skimage.io import ImageCollection, concatenate_images
 
-def get_frames(img, keep_frames=None):
+
+def load_frames(folder_name, offset=0, desired_fps=3, max_frames=40):
     """
-    Gets frames from loaded GIF
-    :return: [T, h, w, 3]
-    """
-    pal = img.getpalette()
-    prev = img.convert('RGBA')
-    prev_dispose = True
-
-    if keep_frames is None:
-        keep_frames = range(img.n_frames)
-    keep_frames_set = set(keep_frames)
-
-    all_frames = []
-    for i, frame in enumerate(ImageSequence.Iterator(img)):
-        dispose = frame.dispose
-
-        if frame.tile:
-            x0, y0, x1, y1 = frame.tile[0][1]
-            if (frame.palette is None) or (not frame.palette.dirty):
-                frame.putpalette(pal)
-            frame = frame.crop((x0, y0, x1, y1))
-            bbox = (x0, y0, x1, y1)
-        else:
-            bbox = None
-
-        if dispose is None:
-            prev.paste(frame, bbox, frame.convert('RGBA'))
-            if i in keep_frames_set:
-                all_frames.append(np.array(prev)[:, :, :3])
-            prev_dispose = False
-        else:
-            if prev_dispose:
-                prev = Image.new('RGBA', img.size, (0, 0, 0, 0))
-            out = prev.copy()
-            out.paste(frame, bbox, frame.convert('RGBA'))
-            if i in keep_frames_set:
-                all_frames.append(np.array(out)[:, :, :3])
-    return np.stack(all_frames)
-
-
-def load_gif(fn, offset=0, desired_fps=3):
-    """
-    :param fn: Filename with a gif
+    :param folder_name: Filename with a gif
     :param offset: How many frames into the gif we want to start at
     :param desired_fps: How many fps we'll sample from the image
     :return: [T, h, w, 3] GIF
     """
-    img = Image.open(fn)
-    if img.info['duration'] == 0:
-        fps = 10
-    else:
-        fps = 1000.0 / img.info['duration']
+    coll = ImageCollection(folder_name + '/out-*.jpg')
 
+    try:
+        duration_path = folder_name + '/duration.txt'
+        with open(duration_path,'r') as f:
+            durs = f.read().splitlines()
+            fps = 100.0/durs[0]
+    except:
+        # Some error occurs
+        fps = 10
 
     # want to scale it to desired_fps
     keep_ratio = max(1., fps/desired_fps)
 
-    frames = np.arange(offset, img.n_frames, keep_ratio).astype(np.uint8)
-    print("Originally {} frames -> {} frames {} KR={}".format(img.n_frames, len(frames), frames, keep_ratio))
+    frames = np.arange(offset, len(coll), keep_ratio).astype(np.uint8)[:max_frames]
+    print("Originally {} frames -> {} frames {} KR={}".format(len(coll), len(frames), frames, keep_ratio))
 
-    return get_frames(img, frames)
+    return concatenate_images(coll[frames])
 
 
 class RandomCrop(object):

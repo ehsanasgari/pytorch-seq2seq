@@ -22,7 +22,7 @@ from dataloaders.gif_transforms import load_gif, RandomCrop, CenterCrop, ToTenso
 
 # Replace with your info
 FN_TO_CAPS = 'dataloaders/tgif/tgif-v1.0.tsv'
-GIFS_FOLDER = 'dataloaders/tgif/gifs'
+GIFS_FOLDER = 'dataloaders/tgif/jpgs/'
 SPLITS = 'dataloaders/tgif/splits'
 
 # Needed for torch pretrained stuff
@@ -30,10 +30,10 @@ normalize = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
 
 def _fix_fn(fn):
+    """Input: tumblr URL,
+    output: folder of JPG images, ie dataloaders/tgif/jpgs/tumblr_lltznfhAdJ1qdoyv4o2_r1_500/
     """
-    Makes it so that we're not referring to the tumblr.com URL
-    """
-    return '{}/{}'.format(GIFS_FOLDER, fn.split('/')[-1])
+    return '{}/{}'.format(GIFS_FOLDER, fn.split('/')[-1].split('.')[0])
 
 
 # Get the splits
@@ -69,8 +69,6 @@ def make_dataset(save_to='tgif-vocab.pkl'):
         for x in data_:
             if os.path.exists(x[0]):
                 data.append(x)
-            # else:
-            #     print("{} doesnt exist".format(x[0]))
 
     print("fitting vocab")
     vocab = Vocab(vocab_size=10000, compress_vocab=True)

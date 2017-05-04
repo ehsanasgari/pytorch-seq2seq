@@ -84,15 +84,13 @@ class EncoderRNN(nn.Module):
 
             print("X shape is {}".format(x.size()))
         else:
-            # if not torch.is_tensor(x):
-            #     raise ValueError('Input to EncoderRNN is not a tensor, list, or PackedSequence')
-
             assert x.ndimension() > 1, "Non PackedSequence input to EncoderRNN must have >= 2 dims"
             if self.use_embedding:
                 new_size = list(x.size()) + [-1]
                 x = self.embed(x.view(-1)).view(*new_size)
             elif self.use_cnn:
-                raise NotImplementedError('not implemented yet.')
+                new_size = list(x.size()) + [-1]
+                x = self.cnn(x.view(-1)).view(*new_size)
 
             lengths = [x.size(0) for x in range(x.size(1))]
 
@@ -294,8 +292,6 @@ def deploy_vid(input_variable, input_lengths, encoder, decoder, max_len=20):
     context, context_lens, final_h = encoder(input_variable, input_lengths)
 
     print("Context: {} context_lens {} final_h {}".format(context, context_lens, final_h))
-
-
 
     return decoder.sampler(final_h, context, context_lens, max_len)
 

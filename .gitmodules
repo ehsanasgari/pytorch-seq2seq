@@ -1,0 +1,3 @@
+[submodule "dataloaders/text"]
+	path = dataloaders/text
+	url = https://github.com/pytorch/text

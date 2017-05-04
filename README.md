@@ -1,18 +1,19 @@
 # pytorch seq2seq
 
-This repository contains an implementation of an LSTM sequence to sequence model in PyTorch. Right now, the implementation is pretty basic and I'm using it on a toy task (an autoencoder for sentences). The source material is sentences from the Jane Austen collection (downloaded on Project Gutenberg, included in this repo). 
+This repository contains an implementation of an LSTM sequence to sequence model in PyTorch. 
 
-Currently it's only tested in Python 2.7.
+## examples:
+* German to English machine translation
+* Video captioning on the Yahoo TGIF dataset
 
 ## requirements
 
 Latest versions of the following:
-* Python 2.7 (at least, that's what I'm using to test it)
+* Python 3.5
 * PyTorch
 * spaCy
 * unidecode
 * numpy
-* cPickle
 
 ## contributing
 
