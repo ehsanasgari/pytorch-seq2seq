@@ -44,7 +44,7 @@ def make_dataset(path='dataloaders/iwslt2016/'):
     spacy_en = spacy.load('en')
 
     DE = data.Field(tokenize=lambda x: tokenize(x, spacy_de))
-    EN = data.Field(tokenize=lambda x: tokenize(x, spacy_en))
+    EN = data.Field(tokenize=lambda x: tokenize(x, spacy_en), init_token='<bos>', eos_token='<eos>')
 
     train, val = datasets.TranslationDataset.splits(
         path=path, train='train.tags.de-en',

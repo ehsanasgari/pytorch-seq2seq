@@ -13,7 +13,6 @@ import torch
 from torch import optim
 from torch.nn import CrossEntropyLoss
 from lstm_attention import EncoderRNN, AttnDecoderRNN, deploy, train_batch
-from torch.nn.utils.rnn import pad_packed_sequence
 
 de, en, train_loader, val_loader = loader(batch_size=32)
 
@@ -22,9 +21,9 @@ def sampler(x, pad_idx=1):
     def _skip_eos(row):
         s = []
         for i in row:
-            s.append(en.vocab.itos[i])
             if i == pad_idx:
                 break
+            s.append(en.vocab.itos[i])
         return s
     x_np = x.data.cpu().numpy().T
     return [' '.join(_skip_eos(row)) for row in x_np]
@@ -35,8 +34,23 @@ d_enc = 256
 d_dec_input = 300
 d_dec = 128
 
-encoder = EncoderRNN(d_enc_input, d_enc, use_embedding=True, vocab_size=len(de.vocab), pad_idx=1)
-decoder = AttnDecoderRNN(d_dec_input, d_enc*2, d_dec, vocab_size=len(en.vocab), pad_idx=1)
+encoder = EncoderRNN(
+    d_enc_input,
+    d_enc,
+    use_embedding=True,
+    vocab_size=len(de.vocab),
+    pad_idx=de.vocab.stoi['<pad>'],
+)
+
+decoder = AttnDecoderRNN(
+    d_dec_input,
+    d_enc*2,
+    d_dec,
+    vocab_size=len(en.vocab),
+    pad_idx=en.vocab.stoi['<pad>'],
+    bos_token=en.vocab.stoi['<bos>'],
+    eos_token=en.vocab.stoi['<eos>'],
+)
 criterion = CrossEntropyLoss()
 
 if torch.cuda.is_available():
@@ -51,17 +65,18 @@ decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
 
 for epoch in range(1, 50):
     for b, batch in enumerate(train_loader):
-        if b % 100 == 1:
+        if b % 1 == 100:
             for val_b, val_batch in enumerate(val_loader):
                 sampled_outs_ = deploy(encoder, decoder, val_batch.src)
                 sampled_outs = sampler(sampled_outs_)
 
                 targets = sampler(val_batch.trg)
                 if val_b == 0:
-                    for i in range(10):
+                    for i in range(min(10, val_batch.src.size(1))):
                         print("----")
                         print("Pred: {}".format(sampled_outs[i]))
                         print("Target: {}".format(targets[i]))
+                    break
 
         start = time.time()
         loss = train_batch(encoder, decoder, [encoder_optimizer, decoder_optimizer], criterion,

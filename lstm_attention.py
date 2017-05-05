@@ -4,18 +4,20 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch.nn as nn
-from torch.autograd import Variable
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
 import numpy as np
-from pytorch_misc import rnn_mask, packed_seq_iter, pad_unsorted_sequence, batch_map
+from pytorch_misc import rnn_mask, packed_seq_iter, PackedShuffledSequence, seq_lengths_from_pad, \
+    const_row
 from torchvision import models
 
 MAX_CNN_SIZE = 32
 
+
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, use_embedding=False, use_cnn=False, vocab_size=None):
+    def __init__(self, input_size, hidden_size, use_embedding=False, use_cnn=False, vocab_size=None,
+                 pad_idx=None):
         """
         Bidirectional GRU for encoding sequences
         :param input_size: Size of the feature dimension (or, if use_embedding=True, the embed dim)
@@ -32,75 +34,59 @@ class EncoderRNN(nn.Module):
         self.use_embedding = use_embedding
         self.use_cnn = use_cnn
         self.vocab_size = vocab_size
+        self.embed = None
         if self.use_embedding:
             assert self.vocab_size is not None
-            self.embed = nn.Embedding(self.vocab_size, self.input_size)
+            self.pad = pad_idx
+            self.embed = nn.Embedding(self.vocab_size, self.input_size, padding_idx=pad_idx)
         elif self.use_cnn:
-            self.cnn = models.resnet101(pretrained=True)
+            self.embed = models.resnet101(pretrained=True)
 
-            # FOR NOW
-            # for param in self.cnn.parameters():
+            # TODO
+            # for param in self.embed.parameters():
             #     param.requires_grad = False
-            self.cnn.fc = nn.Linear(self.cnn.fc.in_features, self.input_size)
+            self.embed.fc = nn.Linear(self.cnn.fc.in_features, self.input_size)
 
             # Init weights (should be moved.)
-            self.cnn.fc.weight.data.normal_(0.0, 0.02)
-            self.cnn.fc.bias.data.fill_(0)
+            self.embed.fc.weight.data.normal_(0.0, 0.02)
+            self.embed.fc.bias.data.fill_(0)
 
-    def forward(self, x, lengths=None):
+    def forward(self, x):
         """
-        Forward pass.
-        :param x: Can either be a time-first packed variable length sequence, with no final
-                  dimension (if using embed) or a final dimension of input_size
+        Forward pass
+        :param x: Can be a time-first PackedSequence (seq. where lengths are in descending order),
+                  a PackedShuffledSequence (where seq. lengths are not in descending order), or
+                  a T x batch_size matrix, where entries that == pad_idx are not used.
 
-                  Or, if all lengths are the same, must be (T, batch_size), if embed, or
-                  (T, batch_size, input_size) otherwise.
-
-        :return: Full context: of shape (batch_size, T, hidden_size). Transposed for efficiency
-                 lengths: of length batch_size, per timestep
-                 hidden: Hidden representation at time t (fwd) and 1 (backward)
+        :return: output: [batch_size, max_T, 2*hidden_size] matrix
+                 lengths: [batch_size] list of the lengths
+                 h_n: [batch_size, 2*hidden_size] vector of the hidden state
         """
-        perm = None
-        # print("X is {} and lengths is {}".format(x, lengths))
         if isinstance(x, PackedSequence):
-            # Assume x is a (T*batch_size,:) packed_sequence
-            if self.use_embedding:
-                x_data = self.embed(x.data)
-            elif self.use_cnn:
-                x_data = self.cnn(x.data)
-            else:
-                x_data = x.data
-
-            x, lengths = pad_packed_sequence(PackedSequence(x_data, x.batch_sizes))
-        elif lengths is not None:
-            if self.use_embedding:
-                x_data = self.embed(x)
-            elif self.use_cnn:
-                print("X is of size {}, going through CNN".format(x.size()))
-                x_data = batch_map(self.cnn, x, MAX_CNN_SIZE)
-            else:
-                x_data = x
-            x, perm = pad_unsorted_sequence(x_data, lengths)
-
-            print("X shape is {}".format(x.size()))
+            # Time-first packed sequence
+            x_data = x.data if self.embed is None else self.embed(x.data)
+            x_tensor, lengths = pad_packed_sequence(PackedSequence(x_data, x.batch_sizes))
+        elif isinstance(x, PackedShuffledSequence):
+            if self.embed is not None:
+                x.data = self.embed(x.data)
+            x_tensor = x.pad()
+            lengths = x.batch_sizes
         else:
-            assert x.ndimension() > 1, "Non PackedSequence input to EncoderRNN must have >= 2 dims"
-            if self.use_embedding:
-                new_size = list(x.size()) + [-1]
-                x = self.embed(x.view(-1)).view(*new_size)
-            elif self.use_cnn:
-                new_size = list(x.size()) + [-1]
-                x = self.cnn(x.view(-1)).view(*new_size)
+            # t x batch_size
+            assert self.use_embedding, "Must use embedding"
+            new_size = list(x.size()) + [-1]
+            x_tensor = self.embed(x.view(-1)).view(*new_size)
 
-            lengths = [x.size(0) for x in range(x.size(1))]
+            lengths = seq_lengths_from_pad(x, self.pad)
 
-        output, h_n = self.gru(x)
+        output, h_n = self.gru(x_tensor)
 
-        output_t = output.transpose(0,1)
-        h_n_fixed = h_n.transpose(0,1)
-        if perm is not None:
-            output_t = output_t[perm]
-            h_n_fixed = h_n_fixed[perm]
+        output_t = output.transpose(0, 1)
+        h_n_fixed = h_n.transpose(0, 1)
+
+        if isinstance(x, PackedShuffledSequence):
+            output_t = output_t[x.perm]
+            h_n_fixed = h_n_fixed[x.perm]
 
         output_t = output_t.contiguous()
         h_n_fixed = h_n_fixed.contiguous().view(-1, self.hidden_size * 2)
@@ -108,10 +94,7 @@ class EncoderRNN(nn.Module):
         return output_t, lengths, h_n_fixed
 
 
-class GlobalAttention(nn.Module):
-    """
-    From https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/modules/GlobalAttention.py
-    """
+class Attention(nn.Module):
     def __init__(self, enc_dim, dec_dim, attn_dim=None):
         """
         Attention mechanism
@@ -119,7 +102,7 @@ class GlobalAttention(nn.Module):
         :param dec_dim: Dimension of the hidden states of the decoder s_{i-1}
         :param dec_dim: Dimension of the internal dimension (default: same as decoder).
         """
-        super(GlobalAttention, self).__init__()
+        super(Attention, self).__init__()
 
         self.enc_dim = enc_dim
         self.dec_dim = dec_dim
@@ -135,6 +118,7 @@ class GlobalAttention(nn.Module):
         :param dec_state:  batch x dec_dim
         :param context: batch x T x enc_dim
         :return: Weighted context, batch x enc_dim
+                 Alpha weights (viz), batch x T
         """
         batch, source_l, enc_dim = context.size()
         assert enc_dim == self.enc_dim
@@ -166,30 +150,30 @@ class GlobalAttention(nn.Module):
 
 class AttnDecoderRNN(nn.Module):
     def __init__(self, embed_dim, encoder_hidden_dim, hidden_dim,
-                 vocab_size, eos=0, bos=1, unk=2):
+                 vocab_size, bos_token=0, pad_idx=1, eos_token=2):
         """
         Initializes the RNN
         :param embed_dim: Dimension of the embeddings
         :param encoder_hidden_dim: Hidden dim of the encoder, for attention purposes
         :param hidden_dim: Hidden dim of the decoder
-        :param vocab_dim: Number of words in the vocab
-        :param eos: end of sentence token
+        :param vocab_size: Number of words in the vocab
+        :param bos_token: To use during decoding (non teacher forcing mode))
         :param bos: beginning of sentence token
         :param unk: unknown token (not used)
         """
+        self.bos_token = bos_token
         self.embed_dim = embed_dim
         self.encoder_hidden_dim = encoder_hidden_dim
         self.hidden_dim = hidden_dim
         self.vocab_size = vocab_size
-        self.eos = eos
-        self.bos = bos
-        self.unk = unk
+        self.pad_idx = pad_idx
+        self.eos_token = eos_token
 
         super(AttnDecoderRNN, self).__init__()
 
-        self.embedding = nn.Embedding(self.vocab_size, self.embed_dim, padding_idx=self.eos)
+        self.embedding = nn.Embedding(self.vocab_size, self.embed_dim, padding_idx=self.pad_idx)
         self.gru = nn.GRU(self.embed_dim + self.encoder_hidden_dim, self.hidden_dim)
-        self.attn = GlobalAttention(self.encoder_hidden_dim, self.hidden_dim)
+        self.attn = Attention(self.encoder_hidden_dim, self.hidden_dim)
         self.out = nn.Linear(self.hidden_dim, self.vocab_size)
 
         # Differs from the paper because I'm using the final forward and backward LSTM states
@@ -207,10 +191,6 @@ class AttnDecoderRNN(nn.Module):
                 alpha: (batch_size, source_l) distribution over the encoded hidden states,
                        useful for debugging maybe
         """
-        print("state {} emb {} context {} mask {}".format(
-            state.size(), embed.size(), context.size(), mask.size()
-        ))
-
         c_t, alpha = self.attn(state, context, mask)
         gru_inp = torch.cat((embed, c_t), 1).unsqueeze(0)
 
@@ -219,54 +199,22 @@ class AttnDecoderRNN(nn.Module):
 
         return out, state, alpha
 
-    def sampler(self, init_h, context, context_lens, max_len=20):
-        """
-        Simple greedy decoding
-        :param init_state:
-        :param context:
-        :param max_len:
-        :return:
-        """
-        batch_size = init_h.size(0)
-        input_tok = Variable(torch.LongTensor([self.bos] * batch_size))
-        if torch.cuda.is_available():
-            input_tok = input_tok.cuda()
-
-        state = self._init_hidden(init_h)
-        mask = rnn_mask(context_lens)
-        outs = []
-
-        has_seen_eos = np.zeros(batch_size, dtype=bool)
-        for l in range(max_len+1): #+1 because of EOS
-            out, state, alpha = self._lstm_loop(state, self.embedding(input_tok), context, mask)
-
-            # Do argmax (since we're doing greedy decoding)
-            input_tok = out.max(1)[1].squeeze(1)
-            outs.append(input_tok)
-
-            has_seen_eos |= (input_tok.cpu().data.numpy() == self.eos)
-            if np.all(has_seen_eos):
-                break
-        return torch.stack(outs, 0)
-
-    def forward(self, h_cat, inputs, context, context_lens):
+    def _teacher_force(self, state, input_data, input_batches, context, mask):
         """
         Does teacher forcing for training
 
-        :param h_cat: (batch_size, d_enc*2) final state size
+        :param state: (batch_size, dim) state size
+        :param input_data: (t*batch_size) flattened array
+        :param input_batches: Batch sizes for each timestep in input_data
         :param context: (T, batch_size, dim) of context
-        :param context_lens: (batch_size) Length of each batch
-        :param inputs: PackedSequence (T*batch_size) of inputs
-        :return:
+        :param mask: (T, batch_size) mask for context
+        :return: Predictions (t*batch_size), exactly the same length as input_data
         """
-        state = self._init_hidden(h_cat)
-
-        embeds = self.embedding(inputs.data)
-        mask = rnn_mask(context_lens)
-
+        embeds = self.embedding(input_data)
         outputs = []
-        for emb, batch_size in zip(packed_seq_iter((embeds, inputs.batch_sizes)),
-                                   inputs.batch_sizes):
+        for emb, batch_size in zip(packed_seq_iter((embeds, input_batches)),
+                                   input_batches):
+
             out, state, alpha = self._lstm_loop(
                 state[:batch_size],
                 emb[:batch_size],
@@ -274,14 +222,69 @@ class AttnDecoderRNN(nn.Module):
                 mask[:batch_size],
             )
             outputs.append(out)
-        outputs = PackedSequence(torch.cat(outputs), inputs.batch_sizes)
-        return outputs
+        return torch.cat(outputs)
+
+    def _sample(self, state, context, mask, max_len=20):
+        """
+        Performs sampling
+        """
+        batch_size = state.size(0)
+        input_tok = const_row(self.bos_token, batch_size)
+        outs = []
+        lens = np.zeros(batch_size, dtype=np.uint8)
+        for l in range(max_len + 1):  # +1 because of EOS
+            out, state, alpha = self._lstm_loop(state, self.embedding(input_tok), context, mask)
+
+            # Do argmax (since we're doing greedy decoding)
+            input_tok = out.max(1)[1].squeeze(1)
+            outs.append(input_tok)
+
+            lens[(input_tok.cpu().data.numpy() == self.eos_token) & (lens == 0)] = l+1
+            if np.all(lens):
+                break
+        lens[lens == 0] = max_len+1
+        return torch.stack(outs, 0), lens
+
+    def forward(self, h_cat, context, context_lens, input_data=None, max_len=20):
+        """
+        Does teacher forcing for training
+
+        :param h_cat: (batch_size, d_enc*2) final state size
+        :param inputs: PackedSequence (T*batch_size) of inputs
+        :param context: (T, batch_size, dim) of context
+        :param context_lens: (batch_size) Length of each batch
+        :return:
+        """
+        state = self._init_hidden(h_cat)
+        mask = rnn_mask(context_lens)
+
+        if input_data is None:
+            return self._sample(state, context, mask, max_len)
+
+        if isinstance(input_data, PackedSequence):
+            tf_out = self._teacher_force(state, input_data.data, input_data.batch_size, context, mask)
+            return PackedSequence(tf_out, input_data.batch_size)
+
+        if isinstance(input_data, PackedShuffledSequence):
+            batch_size = len(input_data.sorted_lens)
+            T = max(input_data.sorted_lens)-1
+            lengths = input_data.batch_sizes
+            data = input_data.data.view(T * batch_size, -1)
+        else:
+            # Regular torch tensor
+            batch_size = input_data.size(1)
+            T = input_data.size(0)-1 # Omit EOS
+            data = input_data[:T].view(T * batch_size)
+            lengths = seq_lengths_from_pad(input_data[:T], self.pad_idx)
+
+        tf_out = self._teacher_force(state, data, [batch_size] * T, context, mask).view(T, batch_size, -1)
+        return tf_out, lengths
 
     def _init_hidden(self, h_dec):
         return F.tanh(self.init_hidden(h_dec))
 
 
-def deploy(encoder, decoder, input_variable, input_lengths=None, max_len=None):
+def deploy(encoder, decoder, input_variable, max_len=20):
     """
     calls the enc/dec model
     :param input_variable: Inputs to encode
@@ -290,13 +293,12 @@ def deploy(encoder, decoder, input_variable, input_lengths=None, max_len=None):
     :param max_len: Maximum length of generated captions
     :return:
     """
-    context, context_lens, final_h = encoder(input_variable, input_lengths)
-    print("Context: {} context_lens {} final_h {}".format(context, context_lens, final_h))
-    return decoder.sampler(final_h, context, context_lens, max_len)
+    context, context_lens, final_h = encoder(input_variable)
+    return decoder(final_h, context, context_lens, max_len=max_len)[0]
 
 
 def train_batch(encoder, decoder, optimizers, criterion, input_variable,
-                target_variable, input_lengths=None):
+                target_variable):
     """
     calls for training
     :param input_variable: Inputs to encode
@@ -312,14 +314,12 @@ def train_batch(encoder, decoder, optimizers, criterion, input_variable,
     for opt in optimizers:
         opt.zero_grad()
 
-    context, context_lens, final_h = encoder(input_variable, input_lengths)
-    print("Context: {} context_lens {} final_h {}".format(context, context_lens, final_h))
-    outputs = decoder(final_h, target_variable, context, context_lens)
+    context, context_lens, final_h = encoder(input_variable)
+    outputs, lengths = decoder(final_h, context, context_lens, input_data=target_variable)
 
-    # NOTE: currently this is weighting longer sequences more than shorter ones.
-    # This seems easier, anyone is welcome to change this though
-    loss = criterion(outputs.data, target_variable.data) / len(target_variable)
-
+    loss = 0
+    for o, l, t in zip(outputs.transpose(0,1), lengths, target_variable.t()):
+        loss += criterion(o[:l], t[1:(l+1)])/(l*len(lengths))
     loss.backward()
     for opt in optimizers:
         opt.step()

@@ -9,7 +9,7 @@ from __future__ import unicode_literals
 
 from torch.autograd import Variable
 import torch
-
+import numpy as np
 
 def packed_seq_iter(packed_seq):
     """
@@ -54,6 +54,37 @@ def rnn_mask(context_lens):
     return mask
 
 
+def seq_lengths_from_pad(x, pad_idx):
+    lengths = x.size(0) - (x == pad_idx).sum(0)[0]
+    return lengths.data.tolist()
+
+
+class PackedShuffledSequence(object):
+    """ For sequences that are not sorted """
+    def __init__(self, data, seq_lens):
+        self.data = data
+        self.batch_sizes = seq_lens
+
+        self.sorted_lens, fwd_indices = torch.sort(
+            torch.IntTensor(seq_lens), dim=0, descending=True
+        )
+        self.perm = torch.sort(fwd_indices)[1]
+        if torch.cuda.is_available():
+            self.perm = self.perm.cuda()
+
+    def pad(self):
+        batch_size = len(self.sorted_lens)
+        max_t = self.sorted_lens[0]
+
+        output = self.data.data.new(max_t, batch_size, *self.data.size()[1:]).zero_()
+        output = Variable(output)
+
+        data_offset = 0
+        for seq_l, sorted_seq_id in zip(self.batch_sizes, self.perm):
+            output[:seq_l, sorted_seq_id] = sequences[data_offset:data_offset + seq_l]
+        return output
+
+
 def batch_index_iterator(len_l, batch_size, skip_end=True):
     """
     Provides indices that iterate over a list
@@ -70,7 +101,6 @@ def batch_index_iterator(len_l, batch_size, skip_end=True):
 
     for b_start in range(0, iterate_until, batch_size):
         yield (b_start, min(b_start+batch_size, len_l))
-
 
 def batch_map(f, a, batch_size):
     """
@@ -92,51 +122,8 @@ def batch_map(f, a, batch_size):
     return torch.cat(rez)
 
 
-
-def pad_unsorted_sequence(sequences, lengths):
-    """
-    Pads the sequences that is not necessarily in longest-batch-first order
-    :param sequences: A (B*t,:) tensor
-    :param lengths: The lengths of the sequences
-    :return: A (max T, B, :) tensor, and also permutation indices to return to normal
-    unsorted order
-    """
-    """Pads a packed batch of variable length sequences.
-
-    It is an inverse operation to :func:`pack_padded_sequence`.
-
-    The returned Variable's data will be of size TxBx*, where T is the length
-    of the longest sequence and B is the batch size. If ``batch_first`` is True,
-    the data will be transposed into BxTx* format.
-
-    Batch elements will be ordered decreasingly by their length.
-
-    Arguments:
-        sequence (PackedSequence): batch to pad
-        batch_first (bool, optional): if True, the output will be in BxTx* format.
-
-    Returns:
-        Tuple of Variable containing the padded sequence, and a list of lengths
-        of each sequence in the batch.
-    """
-    sorted_lengths, fwd_indices = torch.sort(torch.IntTensor(lengths), dim=0, descending=True)
-    inv_indices = torch.sort(fwd_indices)[1]
-
-    print("Lengths: {}".format(lengths))
-    print("Sorted lengths: {}".format(sorted_lengths))
-    print("perm_indices {}".format(inv_indices))
-
-    batch_size = len(lengths)
-    max_t = sorted_lengths[0]
-    output = sequences.data.new(max_t, batch_size, *sequences.size()[1:]).zero_()
-    output = Variable(output)
-
-    data_offset = 0
-    for seq_l, sorted_seq_id in zip(lengths, inv_indices):
-        output[:seq_l, sorted_seq_id] = sequences[data_offset:data_offset + seq_l]
-
+def const_row(fill, l):
+    input_tok = Variable(torch.LongTensor([fill] * l))
     if torch.cuda.is_available():
-        inv_indices = inv_indices.cuda()
-        print("Hi {}".format(inv_indices))
-
-    return output, inv_indices
+        input_tok = input_tok.cuda()
+    return input_tok
