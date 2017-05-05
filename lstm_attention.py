@@ -77,9 +77,6 @@ class EncoderRNN(nn.Module):
             new_size = list(x.size()) + [-1]
 
             lengths = seq_lengths_from_pad(x, self.pad)
-            if max(lengths) > 100:
-                print("Big length")
-                print(x)
             x_tensor = self.embed(x.view(-1)).view(*new_size)
 
 
