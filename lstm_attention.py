@@ -262,8 +262,8 @@ class AttnDecoderRNN(nn.Module):
             return self._sample(state, context, mask, max_len)
 
         if isinstance(input_data, PackedSequence):
-            tf_out = self._teacher_force(state, input_data.data, input_data.batch_size, context, mask)
-            return PackedSequence(tf_out, input_data.batch_size)
+            tf_out = self._teacher_force(state, input_data.data, input_data.batch_sizes, context, mask)
+            return PackedSequence(tf_out, input_data.batch_sizes)
 
         if isinstance(input_data, PackedShuffledSequence):
             batch_size = len(input_data.sorted_lens)
