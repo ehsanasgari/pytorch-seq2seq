@@ -75,9 +75,14 @@ class EncoderRNN(nn.Module):
             # t x batch_size
             assert self.use_embedding, "Must use embedding"
             new_size = list(x.size()) + [-1]
-            x_tensor = self.embed(x.view(-1)).view(*new_size)
 
             lengths = seq_lengths_from_pad(x, self.pad)
+            if max(lengths) > 100:
+                print("Big length")
+                print(x)
+            x_tensor = self.embed(x.view(-1)).view(*new_size)
+
+
 
         output, h_n = self.gru(x_tensor)
 
@@ -276,6 +281,8 @@ class AttnDecoderRNN(nn.Module):
             T = input_data.size(0)-1 # Omit EOS
             data = input_data[:T].view(T * batch_size)
             lengths = seq_lengths_from_pad(input_data[:T], self.pad_idx)
+
+            print("state: {} data: {} context: {} mask: {} batch_size {}, T{}".format(state.size(), data.size(), context.size(), mask.size(), batch_size,T))
 
         tf_out = self._teacher_force(state, data, [batch_size] * T, context, mask).view(T, batch_size, -1)
         return tf_out, lengths

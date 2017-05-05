@@ -55,7 +55,7 @@ def rnn_mask(context_lens):
 
 
 def seq_lengths_from_pad(x, pad_idx):
-    lengths = x.size(0) - (x == pad_idx).sum(0)[0]
+    lengths = x.size(0) - (x == pad_idx).int().sum(0)[0]
     return lengths.data.tolist()
 
 
