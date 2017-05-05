@@ -279,7 +279,7 @@ class AttnDecoderRNN(nn.Module):
             data = input_data[:T].view(T * batch_size)
             lengths = seq_lengths_from_pad(input_data[:T], self.pad_idx)
 
-            print("state: {} data: {} context: {} mask: {} batch_size {}, T{}".format(state.size(), data.size(), context.size(), mask.size(), batch_size,T))
+            # print("state: {} data: {} context: {} mask: {} batch_size {}, T{}".format(state.size(), data.size(), context.size(), mask.size(), batch_size,T))
 
         tf_out = self._teacher_force(state, data, [batch_size] * T, context, mask).view(T, batch_size, -1)
         return tf_out, lengths
