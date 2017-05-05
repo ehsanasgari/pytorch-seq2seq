@@ -70,6 +70,6 @@ def loader(batch_size=32):
     """
     train, val, de, en = make_dataset()
     train_iter = data.BucketIterator(dataset=train, batch_size=batch_size)
-    val_iter = data.BucketIterator(dataset=val, batch_size=batch_size)
+    val_iter = data.BucketIterator(dataset=val, batch_size=batch_size, train=False)
 
     return de, en, train_iter, val_iter
