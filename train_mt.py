@@ -16,7 +16,6 @@ from lstm_attention import EncoderRNN, AttnDecoderRNN, deploy, train_batch
 
 de, en, train_loader, val_loader = loader(batch_size=32)
 
-
 def sampler(x, pad_idx=1):
     def _skip_eos(row):
         s = []
@@ -32,7 +31,7 @@ def sampler(x, pad_idx=1):
 d_enc_input = 300
 d_enc = 256
 d_dec_input = 300
-d_dec = 128
+d_dec = 256
 
 encoder = EncoderRNN(
     d_enc_input,
@@ -59,28 +58,28 @@ if torch.cuda.is_available():
     decoder.cuda()
     criterion.cuda()
 
-learning_rate = 0.0001
+learning_rate = 0.01
 encoder_optimizer = optim.RMSprop(encoder.parameters(), lr=learning_rate)
 decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
 
 for epoch in range(1, 50):
     for b, batch in enumerate(train_loader):
-        if b % 1 == 100:
+        if b % 1000 == 0:
             for val_b, val_batch in enumerate(val_loader):
                 sampled_outs_ = deploy(encoder, decoder, val_batch.src)
                 sampled_outs = sampler(sampled_outs_)
 
                 targets = sampler(val_batch.trg)
-                if val_b == 0:
-                    for i in range(min(10, val_batch.src.size(1))):
-                        print("----")
-                        print("Pred: {}".format(sampled_outs[i]))
-                        print("Target: {}".format(targets[i]))
-                    break
+                for i in range(min(10, val_batch.src.size(1))):
+                    print("----")
+                    print("Pred: {}".format(sampled_outs[i]))
+                    print("Target: {}".format(targets[i]))
+                    print("----", flush=True)
+                break
 
         start = time.time()
         loss = train_batch(encoder, decoder, [encoder_optimizer, decoder_optimizer], criterion,
                            batch.src, batch.trg)
         dur = time.time() - start
-        if b % 50 == 0:
+        if b % 200 == 0:
             print("e{:2d}b{:3d} Loss is {}, ({:.3f} sec/batch)".format(epoch, b, loss.data[0], dur))

@@ -66,20 +66,15 @@ class EncoderRNN(nn.Module):
             # Time-first packed sequence
             x_data = x.data if self.embed is None else self.embed(x.data)
             x_tensor, lengths = pad_packed_sequence(PackedSequence(x_data, x.batch_sizes))
-        elif isinstance(x, PackedShuffledSequence):
+        else:
+            if not isinstance(x, PackedShuffledSequence):
+                # Coerce to packed shuffled sequence temporarily because otherwise we can't do
+                # variable length batch sizes with bidirectional RNN
+                x = PackedShuffledSequence.from_padded_seq(x, pad_idx=self.pad)
             if self.embed is not None:
                 x.data = self.embed(x.data)
             x_tensor = x.pad()
             lengths = x.batch_sizes
-        else:
-            # t x batch_size
-            assert self.use_embedding, "Must use embedding"
-            new_size = list(x.size()) + [-1]
-
-            lengths = seq_lengths_from_pad(x, self.pad)
-            x_tensor = self.embed(x.view(-1)).view(*new_size)
-
-
 
         output, h_n = self.gru(x_tensor)
 
@@ -278,8 +273,6 @@ class AttnDecoderRNN(nn.Module):
             T = input_data.size(0)-1 # Omit EOS
             data = input_data[:T].view(T * batch_size)
             lengths = seq_lengths_from_pad(input_data[:T], self.pad_idx)
-
-            # print("state: {} data: {} context: {} mask: {} batch_size {}, T{}".format(state.size(), data.size(), context.size(), mask.size(), batch_size,T))
 
         tf_out = self._teacher_force(state, data, [batch_size] * T, context, mask).view(T, batch_size, -1)
         return tf_out, lengths

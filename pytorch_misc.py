@@ -62,15 +62,44 @@ def seq_lengths_from_pad(x, pad_idx):
 class PackedShuffledSequence(object):
     """ For sequences that are not sorted """
     def __init__(self, data, seq_lens):
+        """
+        Initializes a PackedShuffledSequence
+        :param data: An array where the sequences are concatenated, ie, data[:t_1] is the first
+                     sequence
+        :param seq_lens: Lengths of the sequences
+        """
         self.data = data
         self.batch_sizes = seq_lens
 
         self.sorted_lens, fwd_indices = torch.sort(
-            torch.IntTensor(seq_lens), dim=0, descending=True
+            torch.IntTensor(seq_lens), dim=0, descending=True,
         )
         self.perm = torch.sort(fwd_indices)[1]
         if torch.cuda.is_available():
             self.perm = self.perm.cuda()
+
+    @classmethod
+    def from_padded_seq(cls, x, lengths=None, pad_idx=None):
+        """
+        Produces a PackedShuffledSequence from an already padded array
+        :param x: [max_T, batch_size] array
+        :param lengths: seq lengths of the batches
+        :param pad_idx: pad index
+        :return: desired PackedShuffledSequence
+        """
+        if lengths is None:
+            if pad_idx is None:
+                raise ValueError('Must supply some way of getting lengths')
+            lengths = seq_lengths_from_pad(x, pad_idx)
+
+        data = x.data.new(sum(lengths), *x.size()[2:]).zero_()
+        data = Variable(data)
+
+        data_offset = 0
+        for i, seq_l in enumerate(lengths):
+            data[data_offset:data_offset+seq_l] = x[:seq_l, i]
+
+        return cls(data, lengths)
 
     def pad(self):
         batch_size = len(self.sorted_lens)
@@ -81,7 +110,7 @@ class PackedShuffledSequence(object):
 
         data_offset = 0
         for seq_l, sorted_seq_id in zip(self.batch_sizes, self.perm):
-            output[:seq_l, sorted_seq_id] = sequences[data_offset:data_offset + seq_l]
+            output[:seq_l, sorted_seq_id] = self.data[data_offset:data_offset + seq_l]
         return output
 
 

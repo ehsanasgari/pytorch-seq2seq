@@ -51,14 +51,11 @@ def make_dataset(path='dataloaders/iwslt2016/'):
         validation='IWSLT16.TED.tst2013.de-en', exts=('.de', '.en'),
         fields=(DE, EN))
 
-    print(train.fields)
-    print(len(train))
-    print(vars(train[0]))
-    print(vars(train[100]))
-
     DE.build_vocab(train.src, min_freq=10)
     EN.build_vocab(train.trg, max_size=50000)
-
+    n_ex = len(train.examples)
+    train.examples = [x for x in train.examples if len(x.src) < 40] # These are garbage
+    print("Number of examples {} -> {}".format(n_ex, len(train.examples)))
     return train, val, DE, EN
 
 
@@ -69,7 +66,9 @@ def loader(batch_size=32):
     :return:
     """
     train, val, de, en = make_dataset()
-    train_iter = data.BucketIterator(dataset=train, batch_size=batch_size)
-    val_iter = data.BucketIterator(dataset=val, batch_size=batch_size, train=False)
+    train_iter = data.BucketIterator(dataset=train, batch_size=batch_size, repeat=False, sort=True)
+    
+    #val_iter = data.BucketIterator(dataset=val, batch_size=batch_size, train=False, repeat=False, sort=True)
+    val_iter = data.Iterator(dataset=val, batch_size=batch_size, train=False, repeat=False, shuffle=True)
 
     return de, en, train_iter, val_iter
