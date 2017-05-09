@@ -31,7 +31,7 @@ d_dec_input = 300
 d_dec = 128
 
 encoder = EncoderRNN(d_enc_input, d_enc, use_cnn=True)
-decoder = AttnDecoderRNN(d_dec_input, d_enc*2, d_dec, vocab_size=len(vocab))
+decoder = AttnDecoderRNN(d_dec_input, d_enc*2, d_dec, vocab_size=len(vocab.vocab))
 criterion = CrossEntropyLoss()
 
 if torch.cuda.is_available():
@@ -50,7 +50,7 @@ for epoch in range(1, 50):
             for val_b, (val_x, val_y, val_y_lens) in enumerate(val_loader):
                 sampled_outs = sampler(deploy(encoder, decoder, val_x))
                 targets = sampler(val_y)
-                for i in range(min(10, val_batch.src.size(1))):
+                for i in range(10):
                     print("----")
                     print("Pred: {}".format(sampled_outs[i]))
                     print("Target: {}".format(targets[i]))

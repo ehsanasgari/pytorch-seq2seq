@@ -44,7 +44,7 @@ class EncoderRNN(nn.Module):
             # TODO
             # for param in self.embed.parameters():
             #     param.requires_grad = False
-            self.embed.fc = nn.Linear(self.cnn.fc.in_features, self.input_size)
+            self.embed.fc = nn.Linear(self.embed.fc.in_features, self.input_size)
 
             # Init weights (should be moved.)
             self.embed.fc.weight.data.normal_(0.0, 0.02)

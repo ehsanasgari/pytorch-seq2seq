@@ -9,7 +9,7 @@ import random
 
 import spacy
 
-import pickle as pkl
+import dill as pkl
 import torch
 from dataloaders.text import torchtext
 
@@ -54,16 +54,18 @@ def make_dataset(save_to='tgif-vocab.pkl'):
                 A list containing (fn, string) pairs for testing
                 A vocabulary of everything
     """
-    if os.path.exists(save_to):
-        with open(save_to, 'rb') as f:
-            return pkl.load(f)
-
-    spacy_en = spacy.load('en')
     caps_field = torchtext.data.Field(
-        tokenize=lambda x: [tok.text for tok in spacy_en.tokenizer(x)],
+        tokenize='spacy',
         init_token='<bos>',
         eos_token='<eos>',
+        lower=True,
     )
+
+    if os.path.exists(save_to):
+        with open(save_to, 'rb') as f:
+            train, val, vocab = pkl.load(f)
+            caps_field.vocab = vocab
+            return train, val, caps_field
 
     splits = {m: set(_read_split(m)) for m in ('train','val','test')}
 
@@ -75,7 +77,7 @@ def make_dataset(save_to='tgif-vocab.pkl'):
             if os.path.exists(x[0]):
                 data.append(x)
 
-    caps_field.build_vocab((x[1] for x in data if x[0] not in splits['test']), max_size=10000)
+    caps_field.build_vocab([(x[1] for x in data if x[0] not in splits['test'])], max_size=10000)
 
     train = [d for d in data if d[0] in splits['train']]
     val = [d for d in data if d[0] in splits['val']]
@@ -83,7 +85,7 @@ def make_dataset(save_to='tgif-vocab.pkl'):
 
     print("saving")
     with open(save_to, 'wb') as f:
-        pkl.dump((train, val, caps_field), f)
+        pkl.dump((train, val, caps_field.vocab), f)
     return train, val, caps_field
 
 
