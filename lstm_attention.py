@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
 import numpy as np
-from pytorch_misc import rnn_mask, packed_seq_iter, PackedShuffledSequence, seq_lengths_from_pad, \
+from pytorch_misc import rnn_mask, packed_seq_iter, PackedSortedSequence, seq_lengths_from_pad, \
     const_row
 from torchvision import models
 
@@ -55,7 +55,7 @@ class EncoderRNN(nn.Module):
         """
         Forward pass
         :param x: Can be a time-first PackedSequence (seq. where lengths are in descending order),
-                  a PackedShuffledSequence (where seq. lengths are not in descending order), or
+                  a PackedSortedSequence (where seq. lengths are not in descending order), or
                   a T x batch_size matrix, where entries that == pad_idx are not used.
 
         :return: output: [batch_size, max_T, 2*hidden_size] matrix
@@ -65,29 +65,25 @@ class EncoderRNN(nn.Module):
         if isinstance(x, PackedSequence):
             # Time-first packed sequence
             x_data = x.data if self.embed is None else self.embed(x.data)
-            x_tensor, lengths = pad_packed_sequence(PackedSequence(x_data, x.batch_sizes))
+            x_packed = PackedSequence(x_data, x.batch_sizes)
         else:
-            if not isinstance(x, PackedShuffledSequence):
+            if not isinstance(x, PackedSortedSequence):
                 # Coerce to packed shuffled sequence temporarily because otherwise we can't do
                 # variable length batch sizes with bidirectional RNN
-                x = PackedShuffledSequence.from_padded_seq(x, pad_idx=self.pad)
+                x = PackedSortedSequence(x, pad_idx=self.pad)
             if self.embed is not None:
-                x.data = self.embed(x.data)
-            x_tensor = x.pad()
-            lengths = x.batch_sizes
+                x.sorted_data = self.embed(x.sorted_data)
+            x_packed = x.as_packed()
 
-        output, h_n = self.gru(x_tensor)
-
-        output_t = output.transpose(0, 1)
-        h_n_fixed = h_n.transpose(0, 1)
-
-        if isinstance(x, PackedShuffledSequence):
-            output_t = output_t[x.perm]
+        output, h_n = self.gru(x_packed)
+        h_n_fixed = h_n.transpose(0,1)
+        if isinstance(x, PackedSequence):
+            output_t, lengths = pad_packed_sequence(output)
+        else:
+            output_t, lengths = x.pad(output)
             h_n_fixed = h_n_fixed[x.perm]
 
-        output_t = output_t.contiguous()
         h_n_fixed = h_n_fixed.contiguous().view(-1, self.hidden_size * 2)
-
         return output_t, lengths, h_n_fixed
 
 
@@ -262,7 +258,7 @@ class AttnDecoderRNN(nn.Module):
             tf_out = self._teacher_force(state, input_data.data, input_data.batch_sizes, context, mask)
             return PackedSequence(tf_out, input_data.batch_sizes)
 
-        if isinstance(input_data, PackedShuffledSequence):
+        if isinstance(input_data, PackedSortedSequence):
             batch_size = len(input_data.sorted_lens)
             T = max(input_data.sorted_lens)-1
             lengths = input_data.batch_sizes

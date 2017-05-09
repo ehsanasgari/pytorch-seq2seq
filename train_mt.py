@@ -14,7 +14,7 @@ from torch import optim
 from torch.nn import CrossEntropyLoss
 from lstm_attention import EncoderRNN, AttnDecoderRNN, deploy, train_batch
 
-de, en, train_loader, val_loader = loader(batch_size=32)
+de, en, train_loader, val_loader = loader(batch_size=16)
 
 def sampler(x, pad_idx=1):
     def _skip_eos(row):
