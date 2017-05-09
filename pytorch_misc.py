@@ -60,61 +60,74 @@ def seq_lengths_from_pad(x, pad_idx):
     lengths = x.size(0) - (x == pad_idx).int().sum(0)[0]
     return lengths.data.tolist()
 
+def pad_list(data):
+    """
+    Pads a list
+    :param data: list of things, first dimension is the length presumably
+    :return:
+    """
+    lens = [len(x) for x in data]
+    data_pad = torch.zeros(max(lens), len(lens), *data[0].size()[1:]).long()
+    for i, (x, l) in enumerate(zip(data, lens)):
+        data_pad[:l, i] = x
+    return data_pad, lens
 
-class PackedSortedSequence(object):
-    """ For sequences that are not sorted """
-    def __init__(self, x, seq_lens=None, pad_idx=None):
-        """
-        Initializes a PackedShuffledSequence
-        :param data: Several options:
-                     1. can be a [max_T, batch_size] array that is padded by pad_idx, or with
-                        sequence lengths seq_lens
-                     2. can be an array where the sequences are concatenated, ie, data[:t_1] is the
-                        first sequence
-        :param seq_lens: Lengths of the sequences
-        :param pad_idx: Pad index
-        """
-        if seq_lens is None:
-            if pad_idx is None:
-                raise ValueError('Must supply some way of getting lengths')
-            seq_lens = seq_lengths_from_pad(x, pad_idx)
 
-        self.seq_lens = seq_lens
-
-        self.sorted_lens, fwd_indices = torch.sort(
-            torch.IntTensor(seq_lens), dim=0, descending=True,
-        )
-        self.perm = torch.sort(fwd_indices)[1]
-        if torch.cuda.is_available():
-            self.perm = self.perm.cuda()
-
-        use_concat = x.size(0) == sum(self.seq_lens)
-
-        if use_concat:
-            self.sorted_data = x.data.new(sum(self.seq_lens), *x.size()[1:]).zero_()
-            raise NotImplementedError()
-        else:
-            sorted_l = []
-            for i, ind in enumerate(fwd_indices):
-                seq_l = self.seq_lens[ind]
-                sorted_l.append(x[:seq_l, ind])
-            self.sorted_data = torch.cat(sorted_l)
-
-    def as_packed(self):
-        return PackedSequence(self.sorted_data, self.sorted_lens)
-
-    def as_padded(self):
-        return self.pad(self.as_packed())
-
-    def pad(self, x):
-        """
-        Pads the PackedSequence x
-        :param x:
-        :return: [batch_size, T, :] array
-        """
-        out, lengths = pad_packed_sequence(x)
-        out = out[self.perm].contiguous()
-        return out, transpose_batch_sizes(lengths)
+# Removing this because it's probably not needed.
+# class PackedSortedSequence(object):
+#     """ For sequences that are not sorted """
+#     def __init__(self, x, seq_lens=None, pad_idx=None):
+#         """
+#         Initializes a PackedShuffledSequence
+#         :param data: Several options:
+#                      1. can be a [max_T, batch_size] array that is padded by pad_idx, or with
+#                         sequence lengths seq_lens
+#                      2. can be an array where the sequences are concatenated, ie, data[:t_1] is the
+#                         first sequence
+#         :param seq_lens: Lengths of the sequences
+#         :param pad_idx: Pad index
+#         """
+#         if seq_lens is None:
+#             if pad_idx is None:
+#                 raise ValueError('Must supply some way of getting lengths')
+#             seq_lens = seq_lengths_from_pad(x, pad_idx)
+#
+#         self.seq_lens = seq_lens
+#
+#         self.sorted_lens, fwd_indices = torch.sort(
+#             torch.IntTensor(seq_lens), dim=0, descending=True,
+#         )
+#         self.perm = torch.sort(fwd_indices)[1]
+#         if torch.cuda.is_available():
+#             self.perm = self.perm.cuda()
+#
+#         use_concat = x.size(0) == sum(self.seq_lens)
+#
+#         if use_concat:
+#             self.sorted_data = x.data.new(sum(self.seq_lens), *x.size()[1:]).zero_()
+#             raise NotImplementedError()
+#         else:
+#             sorted_l = []
+#             for i, ind in enumerate(fwd_indices):
+#                 seq_l = self.seq_lens[ind]
+#                 sorted_l.append(x[:seq_l, ind])
+#             self.sorted_data = torch.cat(sorted_l)
+#
+#     def as_packed(self):
+#         return PackedSequence(self.sorted_data, self.sorted_lens)
+#
+#     def as_padded(self):
+#         return self.pad(self.as_packed())
+#
+#     def pad(self, x):
+#         """
+#         Pads the PackedSequence x
+#         :param x:
+#         :return: [batch_size, T, :] array
+#         """
+#         out, lengths = pad_packed_sequence(x)
+#         out = out[self.perm].contiguous()
+#         return out, transpose_batch_sizes(lengths)
 
 def batch_index_iterator(len_l, batch_size, skip_end=True):
     """
