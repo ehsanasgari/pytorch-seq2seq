@@ -184,4 +184,4 @@ def loader(batch_size=32, shuffle=True, num_workers=1):
         collate_fn=collate_fn
     )
 
-    return vocab, train_data_loader, test_data_loader
+    return train_data_loader, test_data_loader, vocab,

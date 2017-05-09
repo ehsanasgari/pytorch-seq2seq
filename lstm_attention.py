@@ -251,20 +251,12 @@ class AttnDecoderRNN(nn.Module):
             tf_out = self._teacher_force(state, input_data.data, input_data.batch_sizes, context, mask)
             return PackedSequence(tf_out, input_data.batch_sizes)
 
-        if isinstance(input_data, PackedSortedSequence):
-            batch_size = len(input_data.sorted_lens)
-            T = max(input_data.sorted_lens)-1
-            lengths = input_data.seq_lens
-            data = input_data.sorted_data.view(T * batch_size, -1)
-        else:
-            # Regular torch tensor
-            batch_size = input_data.size(1)
-            T = input_data.size(0)-1 # Omit EOS
-            data = input_data[:T].view(T * batch_size)
-            lengths = seq_lengths_from_pad(input_data[:T], self.pad_idx)
-
-        tf_out = self._teacher_force(state, data, [batch_size] * T, context, mask).view(T, batch_size, -1)
-        return tf_out, lengths
+        # Otherwise, it's a normal torch tensor
+        batch_size = input_data.size(1)
+        T = input_data.size(0) - 1 # Last token is EOS
+        #lengths = seq_lengths_from_pad(input_data, self.pad_idx)-1
+        tf_out = self._teacher_force(state, input_data[:T], [batch_size] * T, context, mask).view(T, batch_size, -1)
+        return tf_out #, lengths
 
     def _init_hidden(self, h_dec):
         return F.tanh(self.init_hidden(h_dec))
@@ -283,7 +275,7 @@ def deploy(encoder, decoder, input_variable, max_len=20):
     return decoder(final_h, context, context_lens, max_len=max_len)[0]
 
 
-def train_batch(encoder, decoder, optimizers, criterion, input_variable, target_variable):
+def train_batch(encoder, decoder, optimizers, criterion, input_variable, target_variable, lengths=None):
     """
     calls for training
     :param input_variable: Inputs to encode
@@ -300,7 +292,11 @@ def train_batch(encoder, decoder, optimizers, criterion, input_variable, target_
         opt.zero_grad()
 
     context, context_lens, final_h = encoder(input_variable)
-    outputs, lengths = decoder(final_h, context, context_lens, input_data=target_variable)
+    outputs = decoder(final_h, context, context_lens, input_data=target_variable)
+
+    if isinstance(outputs, PackedSequence):
+        outputs, lengths = outputs
+
 
     loss = 0
     for o, l, t in zip(outputs.transpose(0,1), lengths, target_variable.t()):
