@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
-import numpy as np
 from pytorch_misc import rnn_mask, packed_seq_iter, PackedSortedSequence, seq_lengths_from_pad, \
     const_row
 from torchvision import models
@@ -222,21 +221,24 @@ class AttnDecoderRNN(nn.Module):
         Performs sampling
         """
         batch_size = state.size(0)
-        input_tok = const_row(self.bos_token, batch_size)
-        outs = []
-        lens = np.zeros(batch_size, dtype=np.uint8)
+
+        toks = [const_row(self.bos_token, batch_size)]
+
+        lens = torch.IntTensor(batch_size)
+        if torch.cuda.is_available():
+            lens = lens.cuda()
+
         for l in range(max_len + 1):  # +1 because of EOS
-            out, state, alpha = self._lstm_loop(state, self.embedding(input_tok), context, mask)
+            out, state, alpha = self._lstm_loop(state, self.embedding(toks[-1]), context, mask)
 
             # Do argmax (since we're doing greedy decoding)
-            input_tok = out.max(1)[1].squeeze(1)
-            outs.append(input_tok)
+            toks.append(out.max(1)[1].squeeze(1))
 
-            lens[(input_tok.cpu().data.numpy() == self.eos_token) & (lens == 0)] = l+1
-            if np.all(lens):
+            lens[(toks[-1] == self.eos_token) & (lens == 0)] = l+1
+            if all(lens):
                 break
         lens[lens == 0] = max_len+1
-        return torch.stack(outs, 0), lens
+        return torch.stack(toks, 0), lens
 
     def forward(self, h_cat, context, context_lens, input_data=None, max_len=20):
         """
@@ -261,8 +263,8 @@ class AttnDecoderRNN(nn.Module):
         if isinstance(input_data, PackedSortedSequence):
             batch_size = len(input_data.sorted_lens)
             T = max(input_data.sorted_lens)-1
-            lengths = input_data.batch_sizes
-            data = input_data.data.view(T * batch_size, -1)
+            lengths = input_data.seq_lens
+            data = input_data.sorted_data.view(T * batch_size, -1)
         else:
             # Regular torch tensor
             batch_size = input_data.size(1)
