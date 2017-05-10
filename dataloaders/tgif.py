@@ -14,15 +14,14 @@ import torch
 from dataloaders.text import torchtext
 
 import torchvision.transforms as transforms
-from torch import IntTensor
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
-from pytorch_misc import pad_list
+from pytorch_misc import pad_list, transpose_packed_sequence
 from dataloaders.gif_transforms import load_frames, RandomCrop, CenterCrop, ToTensor, Normalize, Scale
 
 # Replace with your info
 FN_TO_CAPS = 'dataloaders/tgif/tgif-v1.0.tsv'
-GIFS_FOLDER = 'dataloaders/tgif/jpgs/'
+GIFS_FOLDER = 'dataloaders/tgif/jpgs'
 SPLITS = 'dataloaders/tgif/splits'
 
 # Needed for torch pretrained stuff
@@ -46,6 +45,7 @@ def _read_split(ext):
     with open('{}/{}.txt'.format(SPLITS, ext), 'r') as f:
         return [_fix_fn(fn) for fn in f.read().splitlines()]
 
+
 def make_dataset(save_to='tgif-vocab.pkl'):
     """
     Constructs the TGIF dataset
@@ -59,6 +59,7 @@ def make_dataset(save_to='tgif-vocab.pkl'):
         init_token='<bos>',
         eos_token='<eos>',
         lower=True,
+        include_lengths=True,
     )
 
     if os.path.exists(save_to):
@@ -77,7 +78,10 @@ def make_dataset(save_to='tgif-vocab.pkl'):
             if os.path.exists(x[0]):
                 data.append(x)
 
-    caps_field.build_vocab([(x[1] for x in data if x[0] not in splits['test'])], max_size=10000)
+    caps_field.build_vocab(
+        (caps_field.preprocess(x[1]) for x in data if x[0] not in splits['test']),
+        max_size=10000,
+    )
 
     train = [d for d in data if d[0] in splits['train']]
     val = [d for d in data if d[0] in splits['val']]
@@ -115,49 +119,44 @@ class TgifDataset(torch.utils.data.Dataset):
         offset = random.randint(0, 5) if self.is_train else 0
         vid = self.transform(load_frames(self.data[index][0], offset))
         target = self.caps_field.preprocess(self.data[index][1])
-
         return vid, target
 
     def __len__(self):
         return len(self.data)
 
 
-def collate_fn(data):
+def collate_fn(data, caps_field):
     """
     Creates minibatch tensors from list of (input, output) pairs
 
     :param data: tuple of input, output.
     """
+
     # We expect inputs to be longer, so well have those as the unpadded
-    data.sort(key=lambda x: len(x.vid), reverse=True)
+    data.sort(key=lambda x: len(x[0]), reverse=True)
     vids, caps = zip(*data)
 
-    in_data_pad, in_lens = pad_list(vids)
-    in_data = pack_padded_sequence(in_data_pad, in_lens)
+    seq_lens = [len(x) for x in vids]
 
-    out_data_pad, out_lens = pad_list(caps)
-    return in_data, out_data_pad, out_lens
+    in_data = transpose_packed_sequence(PackedSequence(torch.cat(vids), seq_lens))
+    return in_data, caps
 
 
 class CudaDataLoader(torch.utils.data.DataLoader):
     """
     Iterates through the data, but also loads everything as a (cuda) variable
     """
-    @staticmethod
-    def _load(item):
+    def _load(self, item):
         def _cudaize_packed(t):
             data = Variable(t.data)
             if torch.cuda.is_available():
                 data = data.cuda()
             return PackedSequence(data, t.batch_sizes)
 
-        def _cudaize(t):
-            data = Variable(t)
-            if torch.cuda.is_available():
-                data = data.cuda()
-            return data
+        batch = self.dataset.caps_field.pad(item[1])
+        seq, lens = self.dataset.caps_field.numericalize(batch, train=self.dataset.is_train)
 
-        return _cudaize_packed(item[0]), _cudaize(item[1]), item[2]
+        return _cudaize_packed(item[0]), seq, lens
 
     def __iter__(self):
         return (self._load(x) for x in super(CudaDataLoader, self).__iter__())
@@ -175,7 +174,7 @@ def loader(batch_size=32, shuffle=True, num_workers=1):
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        collate_fn=collate_fn,
+        collate_fn=lambda x: collate_fn(x, vocab),
     )
 
     test_data_loader = CudaDataLoader(
@@ -183,7 +182,7 @@ def loader(batch_size=32, shuffle=True, num_workers=1):
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,  # Load data in the main process
-        collate_fn=collate_fn
+        collate_fn=lambda x: collate_fn(x, vocab),
     )
 
     return train_data_loader, test_data_loader, vocab,

@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import torch.nn as nn
 import torch
+from torch.autograd import Variable
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
 from pytorch_misc import rnn_mask, packed_seq_iter, seq_lengths_from_pad, \
@@ -42,8 +43,8 @@ class EncoderRNN(nn.Module):
             self.embed = models.resnet101(pretrained=True)
 
             # TODO
-            # for param in self.embed.parameters():
-            #     param.requires_grad = False
+            for param in self.embed.parameters():
+                param.requires_grad = False
             self.embed.fc = nn.Linear(self.embed.fc.in_features, self.input_size)
 
             # Init weights (should be moved.)
@@ -69,11 +70,10 @@ class EncoderRNN(nn.Module):
         h_n_fixed = h_n.transpose(0,1).contiguous().view(-1, self.hidden_size * 2)
 
         if isinstance(output, PackedSequence):
-            output_t, lengths = pad_packed_sequence(output)
+            output, lengths = pad_packed_sequence(output)
         else:
-            output_t = output.transpose(0,1).contiguous()
-            lengths = [output_t.size(0)]*output_t.size(1)
-
+            lengths = [output.size(1)]*output.size(0)
+        output_t = output.transpose(0, 1).contiguous()
         return output_t, lengths, h_n_fixed
 
 
@@ -213,7 +213,7 @@ class AttnDecoderRNN(nn.Module):
         """
         batch_size = state.size(0)
 
-        toks = [const_row(self.bos_token, batch_size)]
+        toks = [const_row(self.bos_token, batch_size, volatile=True)]
 
         lens = torch.IntTensor(batch_size)
         if torch.cuda.is_available():
@@ -225,7 +225,7 @@ class AttnDecoderRNN(nn.Module):
             # Do argmax (since we're doing greedy decoding)
             toks.append(out.max(1)[1].squeeze(1))
 
-            lens[(toks[-1] == self.eos_token) & (lens == 0)] = l+1
+            lens[(toks[-1].data == self.eos_token) & (lens == 0)] = l+1
             if all(lens):
                 break
         lens[lens == 0] = max_len+1
@@ -254,9 +254,10 @@ class AttnDecoderRNN(nn.Module):
         # Otherwise, it's a normal torch tensor
         batch_size = input_data.size(1)
         T = input_data.size(0) - 1 # Last token is EOS
-        #lengths = seq_lengths_from_pad(input_data, self.pad_idx)-1
-        tf_out = self._teacher_force(state, input_data[:T], [batch_size] * T, context, mask).view(T, batch_size, -1)
-        return tf_out #, lengths
+
+        tf_out = self._teacher_force(state, input_data[:T].view(-1), [batch_size] * T, context, mask)
+        tf_out = tf_out.view(T, batch_size, -1)
+        return tf_out
 
     def _init_hidden(self, h_dec):
         return F.tanh(self.init_hidden(h_dec))
@@ -296,7 +297,6 @@ def train_batch(encoder, decoder, optimizers, criterion, input_variable, target_
 
     if isinstance(outputs, PackedSequence):
         outputs, lengths = outputs
-
 
     loss = 0
     for o, l, t in zip(outputs.transpose(0,1), lengths, target_variable.t()):

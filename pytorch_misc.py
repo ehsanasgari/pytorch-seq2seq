@@ -9,7 +9,7 @@ from __future__ import unicode_literals
 
 from torch.autograd import Variable
 import torch
-from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_sequence
 def packed_seq_iter(packed_seq):
     """
     Returns an iterator for a PackedSequence, where Time is first dim
@@ -38,6 +38,27 @@ def transpose_batch_sizes(lengths):
             length_pointer -= 1
         end_inds.append(length_pointer + 1)
     return end_inds
+
+
+def transpose_packed_sequence(ps):
+    """
+    Goes from a TxB packed sequence to a BxT or vice versa. Assumes that nothing is a variable
+    :param ps: PackedSequence
+    :return:
+    """
+    data, batch_sizes = ps
+    seq_lens = transpose_batch_sizes(batch_sizes)
+
+    # Put things in the permutation matrix one way, take out another way
+    perm_mat = torch.IntTensor(batch_sizes[0], len(batch_sizes)).long().zero_()
+    cur = 0
+    for i, sl in enumerate(seq_lens):
+        for col_ind in range(sl):
+            perm_mat[i, col_ind] = cur + col_ind
+        cur += sl
+    perm = pack_padded_sequence(perm_mat, seq_lens, batch_first=True).data
+    return PackedSequence(data[perm], seq_lens)
+
 
 
 def rnn_mask(context_lens):
@@ -71,7 +92,6 @@ def pad_list(data):
     for i, (x, l) in enumerate(zip(data, lens)):
         data_pad[:l, i] = x
     return data_pad, lens
-
 
 # Removing this because it's probably not needed.
 # class PackedSortedSequence(object):
@@ -166,8 +186,8 @@ def batch_map(f, a, batch_size):
     return torch.cat(rez)
 
 
-def const_row(fill, l):
-    input_tok = Variable(torch.LongTensor([fill] * l))
+def const_row(fill, l, volatile=False):
+    input_tok = Variable(torch.LongTensor([fill] * l),volatile=volatile)
     if torch.cuda.is_available():
         input_tok = input_tok.cuda()
     return input_tok

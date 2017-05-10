@@ -10,9 +10,11 @@ import torch
 from torch import optim
 from torch.nn import CrossEntropyLoss
 from lstm_attention import EncoderRNN, AttnDecoderRNN, deploy, train_batch
-from torch.nn.utils.rnn import pad_packed_sequence
+from itertools import chain
+BATCH_SIZE = 16
 
-train_loader, val_loader, vocab = loader(batch_size=8)
+train_loader, val_loader, vocab = loader(batch_size=BATCH_SIZE)
+
 
 def sampler(x, pad_idx=1):
     def _skip_eos(row):
@@ -41,7 +43,7 @@ if torch.cuda.is_available():
     criterion.cuda()
 
 learning_rate = 0.0001
-encoder_optimizer = optim.RMSprop(encoder.parameters(), lr=learning_rate)
+encoder_optimizer = optim.RMSprop(chain(encoder.gru.parameters(), encoder.embed.fc.parameters()), lr=learning_rate)
 decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
 
 for epoch in range(1, 50):
@@ -50,7 +52,7 @@ for epoch in range(1, 50):
             for val_b, (val_x, val_y, val_y_lens) in enumerate(val_loader):
                 sampled_outs = sampler(deploy(encoder, decoder, val_x))
                 targets = sampler(val_y)
-                for i in range(10):
+                for i in range(BATCH_SIZE):
                     print("----")
                     print("Pred: {}".format(sampled_outs[i]))
                     print("Target: {}".format(targets[i]))

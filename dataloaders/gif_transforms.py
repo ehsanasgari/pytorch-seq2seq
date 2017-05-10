@@ -18,7 +18,7 @@ def load_frames(folder_name, offset=0, desired_fps=3, max_frames=40):
     :param desired_fps: How many fps we'll sample from the image
     :return: [T, h, w, 3] GIF
     """
-    coll = ImageCollection(folder_name + '/out-*.jpg')
+    coll = ImageCollection(folder_name + '/out-*.jpg', mode='RGB')
 
     try:
         duration_path = folder_name + '/duration.txt'
@@ -32,10 +32,16 @@ def load_frames(folder_name, offset=0, desired_fps=3, max_frames=40):
     # want to scale it to desired_fps
     keep_ratio = max(1., fps/desired_fps)
 
-    frames = np.arange(offset, len(coll), keep_ratio).astype(np.uint8)[:max_frames]
-    print("Originally {} frames -> {} frames {} KR={}".format(len(coll), len(frames), frames, keep_ratio))
+    frames = np.arange(offset, len(coll), keep_ratio).astype(int)[:max_frames]
 
-    return concatenate_images(coll[frames])
+    def _add_chans(img):
+        if img.ndim == 3:
+            return img
+        return np.stack([img]*3,-1)
+
+    imgs_concat = concatenate_images([_add_chans(coll[f]) for f in frames])
+    assert imgs_concat.ndim == 4
+    return imgs_concat
 
 
 class RandomCrop(object):
@@ -61,8 +67,6 @@ class RandomCrop(object):
         th, tw = self.size
         if w == tw and h == th:
             return img
-
-        print("Image shape is {}, size is {}".format(img.shape, self.size))
 
         if (w < tw) or (h < th):
             raise ValueError('Image too small')
@@ -128,7 +132,8 @@ class Scale(object):
         else:
             oh = self.size
             ow = int(self.size * w / h)
-        return np.stack([resize(frame, (oh, ow), mode='constant') for frame in img])
+        resized = np.stack([resize(frame, (oh, ow), mode='constant', preserve_range=True) for frame in img])
+        return resized
 
 
 class RandomHorizontalFlip(object):
@@ -147,9 +152,9 @@ class ToTensor(object):
     """
 
     def __call__(self, vid):
-        print("Vid shape is {}".format(vid.shape))
         img = torch.from_numpy(vid.transpose((0,3, 1, 2)))
-        return img.float().div(255)
+        img = img.float().div(255)
+        return img
 
 
 class Normalize(object):
