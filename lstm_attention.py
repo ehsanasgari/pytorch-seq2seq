@@ -14,7 +14,6 @@ from torchvision import models
 
 MAX_CNN_SIZE = 32
 
-
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, use_embedding=False, use_cnn=False, vocab_size=None,
                  pad_idx=None):
@@ -40,9 +39,8 @@ class EncoderRNN(nn.Module):
             self.pad = pad_idx
             self.embed = nn.Embedding(self.vocab_size, self.input_size, padding_idx=pad_idx)
         elif self.use_cnn:
-            self.embed = models.resnet101(pretrained=True)
+            self.embed = models.resnet50(pretrained=True)
 
-            # TODO
             for param in self.embed.parameters():
                 param.requires_grad = False
             self.embed.fc = nn.Linear(self.embed.fc.in_features, self.input_size)
@@ -61,11 +59,11 @@ class EncoderRNN(nn.Module):
                  lengths: [batch_size] list of the lengths
                  h_n: [batch_size, 2*hidden_size] vector of the hidden state
         """
+        print("X size is {}".format(x.data.size()))
         if isinstance(x, PackedSequence):
             x_embed = x if self.embed is None else PackedSequence(self.embed(x.data), x.batch_sizes)
         else:
             x_embed = x if self.embed is None else self.embed(x)
-
         output, h_n = self.gru(x_embed)
         h_n_fixed = h_n.transpose(0,1).contiguous().view(-1, self.hidden_size * 2)
 

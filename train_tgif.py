@@ -11,10 +11,11 @@ from torch import optim
 from torch.nn import CrossEntropyLoss
 from lstm_attention import EncoderRNN, AttnDecoderRNN, deploy, train_batch
 from itertools import chain
-BATCH_SIZE = 16
+BATCH_SIZE = 2
+
+# TODO: Figure out memory usage issues
 
 train_loader, val_loader, vocab = loader(batch_size=BATCH_SIZE)
-
 
 def sampler(x, pad_idx=1):
     def _skip_eos(row):
